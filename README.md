@@ -44,7 +44,7 @@ src/
 ```bash
 # 저장소 클론
 git clone <repository-url>
-cd autoscan-sell-backend
+cd prototype-socket
 
 # 의존성 설치
 npm install
