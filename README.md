@@ -229,5 +229,5 @@ PRICE_API_URL=https://xgltqfyf77.execute-api.ap-northeast-2.amazonaws.com/predic
 
 ## 관련 프로젝트
 
-- [autoscan-sell](../autoscan-sell) - 프론트엔드
+- [prototype-fe](../prototype-fe) - 프론트엔드
 
