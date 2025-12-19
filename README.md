@@ -4,13 +4,14 @@
 
 ## 프로젝트 소개
 
-AutoScan Sell 백엔드는 고객과 상담원 간의 실시간 통신을 담당하고, OCR 및 가격 예측 API를 중계하는 서버입니다. Socket.IO를 통해 실시간 양방향 통신을 지원합니다.
+AutoScan Sell 백엔드는 고객과 상담원 간의 실시간 통신을 담당하고, OCR 및 가격 예측 API를 중계하는 서버입니다. OCR 텍스트는 설정 시 LLM으로 구조화하고, 실패하거나 LLM이 비활성화된 경우 기존 Regex 파서를 fallback으로 사용합니다. Socket.IO를 통해 실시간 양방향 통신을 지원합니다.
 
 ### 주요 기능
 
 - **실시간 통신**: Socket.IO를 통한 고객-상담원 간 실시간 데이터 동기화
 - **세션 관리**: 고객 세션 생성, 조회, 상태 관리
 - **OCR 서비스**: 외부 OCR API 호출 및 결과 처리
+- **LLM 구조화 추출**: OCR 텍스트에서 문서 유형과 주요 필드를 구조화하고 Regex fallback 지원
 - **가격 예측 서비스**: 외부 ML API 호출 및 결과 처리
 - **서류 검증**: 업로드된 서류의 유효성 검사 (유효기간, 필수 필드 등)
 
@@ -27,7 +28,8 @@ AutoScan Sell 백엔드는 고객과 상담원 간의 실시간 통신을 담당
 ```
 src/
 ├── index.ts          # 서버 진입점, Socket.IO 이벤트 핸들러
-├── ocrService.ts     # OCR API 연동 및 서류 검증
+├── ocrService.ts     # OCR API 연동, 구조화 추출 연결 및 서류 검증
+├── llmService.ts     # OpenAI Structured Outputs 기반 OCR 텍스트 구조화
 ├── priceService.ts   # 가격 예측 API 연동
 └── types.ts          # TypeScript 타입 정의
 ```
@@ -168,6 +170,14 @@ interface PricePrediction {
 }
 ```
 
+### LLM 구조화 추출 (OpenAI)
+- OCR API가 반환한 `merged_text` 또는 문자열 `extracted_text`를 대상으로 실행
+- OpenAI Responses API의 Structured Outputs로 문서 유형과 허용된 필드만 반환
+- OCR 원문에 없는 값은 추측하지 않도록 프롬프트와 출력 스키마를 제한
+- 주민등록번호는 LLM 전송 전에 뒷자리를 마스킹
+- `OPENAI_API_KEY`가 없거나 호출/파싱에 실패하면 기존 Regex 파서로 자동 fallback
+- 서류 유효기간, 필수 필드, 문서 간 일관성 검증은 기존 rule-based 로직을 유지
+
 ### 가격 예측 API (AWS Lambda)
 - URL: `https://xgltqfyf77.execute-api.ap-northeast-2.amazonaws.com/predict`
 - Method: POST
@@ -225,6 +235,11 @@ interface PricePrediction {
 PORT=3001
 OCR_API_URL=https://ganada0037--ocr-serverless-split-ocrservice-analyze-dev.modal.run
 PRICE_API_URL=https://xgltqfyf77.execute-api.ap-northeast-2.amazonaws.com/predict
+OPENAI_API_KEY=your_api_key
+OPENAI_MODEL=gpt-3.5-turbo
+LLM_EXTRACTION_ENABLED=true
+# 선택: LLM_EXTRACTION_TIMEOUT_MS=20000
+# 선택: OPENAI_RESPONSES_API_URL=https://api.openai.com/v1/responses
 ```
 
 ## 관련 프로젝트
