@@ -1,6 +1,7 @@
 import axios from 'axios';
 import FormData from 'form-data';
 import type { DocumentType, OCRResult, ValidationError } from './types.js';
+import { extractDocumentWithLLM, isLLMExtractionEnabled } from './llmService.js';
 
 const OCR_API_URL = 'https://ganada0037--ocr-serverless-split-ocrservice-analyze.modal.run';
 
@@ -271,6 +272,21 @@ function parseDocumentFromMergedText(mergedText: string): { documentType: Docume
   return { documentType, extractedData };
 }
 
+async function parseDocumentText(mergedText: string): Promise<{ documentType: DocumentType; extractedData: Record<string, string> }> {
+  if (!isLLMExtractionEnabled()) {
+    return parseDocumentFromMergedText(mergedText);
+  }
+
+  try {
+    const parsed = await extractDocumentWithLLM(mergedText);
+    console.log('[LLM] Structured document extraction completed:', parsed.documentType);
+    return parsed;
+  } catch (error: any) {
+    console.warn('[LLM] Structured extraction failed. Falling back to regex parser:', error?.message || error);
+    return parseDocumentFromMergedText(mergedText);
+  }
+}
+
 // 서류 타입 추론 (extractedData 기반 - 레거시 호환)
 function inferDocumentType(extractedData: Record<string, string>): DocumentType {
   const dataString = JSON.stringify(extractedData).toLowerCase();
@@ -415,7 +431,7 @@ export async function analyzeDocument(fileUrl: string, fileName: string): Promis
     // merged_text가 있으면 우선적으로 파싱 (새 API 형식)
     if (ocrData.merged_text && typeof ocrData.merged_text === 'string') {
       console.log('Using merged_text for parsing');
-      const parsed = parseDocumentFromMergedText(ocrData.merged_text);
+      const parsed = await parseDocumentText(ocrData.merged_text);
       documentType = parsed.documentType;
       extractedData = parsed.extractedData;
 
@@ -462,7 +478,7 @@ export async function analyzeDocument(fileUrl: string, fileName: string): Promis
     // extracted_text 형식 (레거시)
     else if (ocrData.extracted_text) {
       if (typeof ocrData.extracted_text === 'string') {
-        const parsed = parseDocumentFromMergedText(ocrData.extracted_text);
+        const parsed = await parseDocumentText(ocrData.extracted_text);
         documentType = parsed.documentType;
         extractedData = parsed.extractedData;
       } else if (typeof ocrData.extracted_text === 'object') {
