@@ -2,7 +2,7 @@ import axios from 'axios';
 import FormData from 'form-data';
 import type { DocumentType, OCRResult, ValidationError } from './types.js';
 
-const OCR_API_URL = 'https://ganada0037--ocr-serverless-split-ocrservice-analyze-dev.modal.run';
+const OCR_API_URL = 'https://ganada0037--ocr-serverless-split-ocrservice-analyze.modal.run';
 
 // Base64 이미지를 Buffer로 변환
 function base64ToBuffer(base64String: string): Buffer {
@@ -11,7 +11,262 @@ function base64ToBuffer(base64String: string): Buffer {
   return Buffer.from(base64Data, 'base64');
 }
 
-// 서류 타입 추론
+// 서류 타입 추론 (텍스트 기반)
+function inferDocumentTypeFromText(text: string): DocumentType {
+  const lowerText = text.toLowerCase();
+
+  if (lowerText.includes('자동차등록증') || lowerText.includes('차대번호') || lowerText.includes('자동차등록번호')) {
+    return 'vehicle_registration';
+  }
+  if (lowerText.includes('완납') || lowerText.includes('자동차세') || lowerText.includes('납세증명') || lowerText.includes('지방세')) {
+    return 'tax_payment';
+  }
+  if (lowerText.includes('인감증명') || lowerText.includes('본인서명') || lowerText.includes('매도용') || lowerText.includes('위임')) {
+    return 'seal_certificate';
+  }
+  if (lowerText.includes('사업자등록') || lowerText.includes('사업자등록번호') || lowerText.includes('상호') || lowerText.includes('업태')) {
+    return 'business_registration';
+  }
+
+  return 'vehicle_registration';
+}
+
+// merged_text에서 자동차등록증 정보 추출
+function parseVehicleRegistration(text: string): Record<string, string> {
+  const data: Record<string, string> = {};
+
+  // 자동차등록번호 (차량번호)
+  const regNumMatch = text.match(/자동차등록번호\s*([0-9]{2,3}[가-힣][0-9]{4})/);
+  if (regNumMatch) {
+    data['차량번호'] = regNumMatch[1];
+  }
+
+  // 최초등록일
+  const firstRegMatch = text.match(/최초등록일\s*(\d{4}[-./]\d{2}[-./]\d{2})/);
+  if (firstRegMatch) {
+    data['최초등록일'] = firstRegMatch[1].replace(/[./]/g, '-');
+  }
+
+  // 차명 (차종)
+  const carNameMatch = text.match(/차명\s*([가-힣a-zA-Z0-9()]+)/);
+  if (carNameMatch) {
+    data['차명'] = carNameMatch[1].replace(/[0-9]형식.*/, '').trim();
+  }
+
+  // 형식 및 연식
+  const yearMatch = text.match(/형식및연식\s*(\d{4})/);
+  if (yearMatch) {
+    data['연식'] = yearMatch[1];
+  }
+
+  // 차대번호
+  const vinMatch = text.match(/차별번호\s*([A-Z0-9]{17})/i) || text.match(/차대번호\s*([A-Z0-9]{17})/i);
+  if (vinMatch) {
+    data['차대번호'] = vinMatch[1].toUpperCase();
+  }
+
+  // 원동기형식 (엔진)
+  const engineMatch = text.match(/원동기형식\s*([A-Z0-9]+)/i);
+  if (engineMatch) {
+    data['원동기형식'] = engineMatch[1];
+  }
+
+  // 성명 (소유자)
+  const ownerMatch = text.match(/성명\s*\(?\s*명칭\s*\)?\s*([가-힣]+)/);
+  if (ownerMatch) {
+    data['소유자'] = ownerMatch[1];
+  }
+
+  // 주민등록번호
+  const ssnMatch = text.match(/주민\s*\(?\s*사업자?\s*등록번호\s*\)?\s*(\d{6}[-]?\d{7})/);
+  if (ssnMatch) {
+    data['주민등록번호'] = ssnMatch[1].substring(0, 6) + '-*******';
+  }
+
+  // 사용본거지 (주소)
+  const addrMatch = text.match(/사용본거지\s*([가-힣0-9\s-]+?)(?=\d*성명|\d*$)/);
+  if (addrMatch) {
+    data['사용본거지'] = addrMatch[1].trim();
+  }
+
+  // 배기량
+  const dispMatch = text.match(/(\d{3,4})\s*cc/i);
+  if (dispMatch) {
+    data['배기량'] = dispMatch[1] + 'cc';
+  }
+
+  // 승차정원
+  const capacityMatch = text.match(/승차\s*(\d+)\s*명/);
+  if (capacityMatch) {
+    data['승차정원'] = capacityMatch[1] + '명';
+  }
+
+  // 연료 종류
+  const fuelMatch = text.match(/연료의\s*종류\s*\(?([가-힣]+)/);
+  if (fuelMatch) {
+    data['연료'] = fuelMatch[1];
+  } else if (text.includes('휘발유') || text.includes('가솔린')) {
+    data['연료'] = '휘발유';
+  } else if (text.includes('경유') || text.includes('디젤')) {
+    data['연료'] = '경유';
+  }
+
+  // 발급일 추출 (문서 하단)
+  const issueDateMatch = text.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+  if (issueDateMatch) {
+    const year = issueDateMatch[1];
+    const month = issueDateMatch[2].padStart(2, '0');
+    const day = issueDateMatch[3].padStart(2, '0');
+    data['발급일'] = `${year}-${month}-${day}`;
+  }
+
+  return data;
+}
+
+// merged_text에서 납세증명서 정보 추출
+function parseTaxPayment(text: string): Record<string, string> {
+  const data: Record<string, string> = {};
+
+  // 납세자 성명
+  const nameMatch = text.match(/납세자\s*[:\s]*([가-힣]+)/) || text.match(/성명\s*[:\s]*([가-힣]+)/);
+  if (nameMatch) {
+    data['납세자'] = nameMatch[1];
+  }
+
+  // 차량번호
+  const regNumMatch = text.match(/([0-9]{2,3}[가-힣][0-9]{4})/);
+  if (regNumMatch) {
+    data['차량번호'] = regNumMatch[1];
+  }
+
+  // 납부금액
+  const amountMatch = text.match(/(\d{1,3}(,\d{3})*)\s*원/);
+  if (amountMatch) {
+    data['납부금액'] = amountMatch[1] + '원';
+  }
+
+  // 완납 여부
+  if (text.includes('완납') || text.includes('체납없음')) {
+    data['납부상태'] = '완납';
+  }
+
+  // 발급일
+  const issueDateMatch = text.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+  if (issueDateMatch) {
+    const year = issueDateMatch[1];
+    const month = issueDateMatch[2].padStart(2, '0');
+    const day = issueDateMatch[3].padStart(2, '0');
+    data['발급일'] = `${year}-${month}-${day}`;
+  }
+
+  return data;
+}
+
+// merged_text에서 인감증명서 정보 추출
+function parseSealCertificate(text: string): Record<string, string> {
+  const data: Record<string, string> = {};
+
+  // 성명
+  const nameMatch = text.match(/성명\s*[:\s]*([가-힣]+)/) || text.match(/본인\s*[:\s]*([가-힣]+)/);
+  if (nameMatch) {
+    data['성명'] = nameMatch[1];
+  }
+
+  // 주민등록번호 (마스킹)
+  const ssnMatch = text.match(/(\d{6})[-\s]*\d{7}/);
+  if (ssnMatch) {
+    data['주민등록번호'] = ssnMatch[1] + '-*******';
+  }
+
+  // 주소
+  const addrMatch = text.match(/주소\s*[:\s]*([가-힣0-9\s-]+?)(?=용도|$)/);
+  if (addrMatch) {
+    data['주소'] = addrMatch[1].trim();
+  }
+
+  // 용도
+  if (text.includes('매도')) {
+    data['용도'] = '매도용';
+  } else if (text.includes('위임')) {
+    data['용도'] = '위임용';
+  }
+
+  // 발급일
+  const issueDateMatch = text.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+  if (issueDateMatch) {
+    const year = issueDateMatch[1];
+    const month = issueDateMatch[2].padStart(2, '0');
+    const day = issueDateMatch[3].padStart(2, '0');
+    data['발급일'] = `${year}-${month}-${day}`;
+  }
+
+  return data;
+}
+
+// merged_text에서 사업자등록증 정보 추출
+function parseBusinessRegistration(text: string): Record<string, string> {
+  const data: Record<string, string> = {};
+
+  // 상호
+  const companyMatch = text.match(/상호\s*[:\s]*([가-힣a-zA-Z0-9\s]+?)(?=대표|사업|$)/);
+  if (companyMatch) {
+    data['상호'] = companyMatch[1].trim();
+  }
+
+  // 대표자
+  const repMatch = text.match(/대표자\s*[:\s]*([가-힣]+)/);
+  if (repMatch) {
+    data['대표자'] = repMatch[1];
+  }
+
+  // 사업자등록번호
+  const bizNumMatch = text.match(/(\d{3}[-]\d{2}[-]\d{5})/);
+  if (bizNumMatch) {
+    data['사업자등록번호'] = bizNumMatch[1];
+  }
+
+  // 업태
+  const bizTypeMatch = text.match(/업태\s*[:\s]*([가-힣\s]+?)(?=종목|$)/);
+  if (bizTypeMatch) {
+    data['업태'] = bizTypeMatch[1].trim();
+  }
+
+  // 발급일
+  const issueDateMatch = text.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+  if (issueDateMatch) {
+    const year = issueDateMatch[1];
+    const month = issueDateMatch[2].padStart(2, '0');
+    const day = issueDateMatch[3].padStart(2, '0');
+    data['발급일'] = `${year}-${month}-${day}`;
+  }
+
+  return data;
+}
+
+// merged_text에서 문서 타입에 따라 필드 추출
+function parseDocumentFromMergedText(mergedText: string): { documentType: DocumentType; extractedData: Record<string, string> } {
+  const documentType = inferDocumentTypeFromText(mergedText);
+  let extractedData: Record<string, string> = {};
+
+  switch (documentType) {
+    case 'vehicle_registration':
+      extractedData = parseVehicleRegistration(mergedText);
+      break;
+    case 'tax_payment':
+      extractedData = parseTaxPayment(mergedText);
+      break;
+    case 'seal_certificate':
+      extractedData = parseSealCertificate(mergedText);
+      break;
+    case 'business_registration':
+      extractedData = parseBusinessRegistration(mergedText);
+      break;
+  }
+
+  return { documentType, extractedData };
+}
+
+// 서류 타입 추론 (extractedData 기반 - 레거시 호환)
 function inferDocumentType(extractedData: Record<string, string>): DocumentType {
   const dataString = JSON.stringify(extractedData).toLowerCase();
 
@@ -148,58 +403,80 @@ export async function analyzeDocument(fileUrl: string, fileName: string): Promis
     console.log('OCR API Response:', JSON.stringify(ocrData, null, 2));
 
     // 추출된 데이터 정리
-    const extractedData: Record<string, string> = {};
-    let totalConfidence = 0;
-    let confidenceCount = 0;
+    let extractedData: Record<string, string> = {};
+    let documentType: DocumentType;
+    let avgConfidence = 0.85;
 
-    // 새로운 API 응답 형식 처리: {"status":"success","count":N,"results":[...]}
-    if (ocrData.status === 'success' && ocrData.results && Array.isArray(ocrData.results)) {
-      if (ocrData.results.length === 0) {
-        extractedData['인식결과'] = '텍스트를 인식할 수 없습니다.';
-      } else {
-        // results 배열에서 데이터 추출
-        ocrData.results.forEach((result: any, index: number) => {
-          if (result.text) {
-            extractedData[`텍스트_${index + 1}`] = result.text;
-          }
-          if (result.field && result.value) {
-            extractedData[result.field] = result.value;
-          }
-          // confidence 값 수집 (ocr 신뢰도 사용)
+    // merged_text가 있으면 우선적으로 파싱 (새 API 형식)
+    if (ocrData.merged_text && typeof ocrData.merged_text === 'string') {
+      console.log('Using merged_text for parsing');
+      const parsed = parseDocumentFromMergedText(ocrData.merged_text);
+      documentType = parsed.documentType;
+      extractedData = parsed.extractedData;
+
+      // confidence 계산 (results 배열에서)
+      if (ocrData.results && Array.isArray(ocrData.results)) {
+        let totalConfidence = 0;
+        let confidenceCount = 0;
+        ocrData.results.forEach((result: any) => {
           if (result.confidence && typeof result.confidence.ocr === 'number') {
             totalConfidence += result.confidence.ocr;
             confidenceCount++;
           }
-          // 다른 형식의 결과도 처리
-          if (typeof result === 'object') {
-            Object.entries(result).forEach(([key, value]) => {
-              if (key !== 'text' && key !== 'confidence' && key !== 'bbox' && key !== 'id' && typeof value === 'string') {
-                extractedData[key] = value;
-              }
-            });
+        });
+        if (confidenceCount > 0) {
+          avgConfidence = totalConfidence / confidenceCount;
+        }
+      }
+
+      console.log('Parsed document type:', documentType);
+      console.log('Extracted data:', extractedData);
+    }
+    // 기존 API 응답 형식 처리 (fallback)
+    else if (ocrData.status === 'success' && ocrData.results && Array.isArray(ocrData.results)) {
+      let totalConfidence = 0;
+      let confidenceCount = 0;
+
+      if (ocrData.results.length === 0) {
+        extractedData['인식결과'] = '텍스트를 인식할 수 없습니다.';
+      } else {
+        ocrData.results.forEach((result: any) => {
+          if (result.field && result.value) {
+            extractedData[result.field] = result.value;
+          }
+          if (result.confidence && typeof result.confidence.ocr === 'number') {
+            totalConfidence += result.confidence.ocr;
+            confidenceCount++;
           }
         });
       }
-    } else if (ocrData.extracted_text) {
-      // 기존 API 응답 형식 처리 (fallback)
+
+      avgConfidence = confidenceCount > 0 ? totalConfidence / confidenceCount : 0.85;
+      documentType = ocrData.document_type || inferDocumentType(extractedData);
+    }
+    // extracted_text 형식 (레거시)
+    else if (ocrData.extracted_text) {
       if (typeof ocrData.extracted_text === 'string') {
-        extractedData['원본텍스트'] = ocrData.extracted_text;
+        const parsed = parseDocumentFromMergedText(ocrData.extracted_text);
+        documentType = parsed.documentType;
+        extractedData = parsed.extractedData;
       } else if (typeof ocrData.extracted_text === 'object') {
         Object.assign(extractedData, ocrData.extracted_text);
+        documentType = inferDocumentType(extractedData);
+      } else {
+        documentType = 'vehicle_registration';
       }
+      avgConfidence = ocrData.confidence || 0.85;
+    }
+    // 기타
+    else {
+      documentType = 'vehicle_registration';
+      extractedData = { '인식결과': 'OCR 결과를 파싱할 수 없습니다.' };
     }
 
     if (ocrData.fields) {
       Object.assign(extractedData, ocrData.fields);
     }
-
-    // 평균 신뢰도 계산
-    const avgConfidence = confidenceCount > 0
-      ? totalConfidence / confidenceCount
-      : (ocrData.confidence || 0.85);
-
-    // 서류 타입 추론
-    const documentType = ocrData.document_type || inferDocumentType(extractedData);
 
     // 유효성 검증
     const validation = validateDocument(documentType, extractedData);
@@ -250,6 +527,64 @@ export async function analyzeDocument(fileUrl: string, fileName: string): Promis
       isValid: false,
     };
   }
+}
+
+// 여러 서류 간 일관성 검증
+export function validateDocumentConsistency(documents: Array<{ ocrResult?: OCRResult }>): ValidationError[] {
+  const errors: ValidationError[] = [];
+  const ocrResults = documents
+    .filter((doc) => doc.ocrResult)
+    .map((doc) => doc.ocrResult!);
+
+  if (ocrResults.length < 2) {
+    return errors; // 서류가 2개 미만이면 비교 불가
+  }
+
+  // 모든 서류에서 차량번호 추출
+  const vehicleNumbers: string[] = [];
+  const ownerNames: string[] = [];
+
+  for (const ocr of ocrResults) {
+    const data = ocr.extractedData;
+
+    // 차량번호 수집 (다양한 필드명 지원)
+    const vehicleNum = data['차량번호'] || data['등록번호'] || data['자동차번호'];
+    if (vehicleNum) {
+      vehicleNumbers.push(vehicleNum.replace(/\s+/g, ''));
+    }
+
+    // 소유자 이름 수집
+    const ownerName = data['소유자'] || data['성명'] || data['납세자'] || data['대표자'] || data['본인'];
+    if (ownerName) {
+      ownerNames.push(ownerName.replace(/\s+/g, ''));
+    }
+  }
+
+  // 차량번호 일관성 검증
+  if (vehicleNumbers.length >= 2) {
+    const uniqueVehicleNumbers = [...new Set(vehicleNumbers)];
+    if (uniqueVehicleNumbers.length > 1) {
+      errors.push({
+        field: '차량번호 불일치',
+        message: `서류 간 차량번호가 다릅니다: ${uniqueVehicleNumbers.join(', ')}`,
+        severity: 'error',
+      });
+    }
+  }
+
+  // 소유자 이름 일관성 검증
+  if (ownerNames.length >= 2) {
+    const uniqueOwnerNames = [...new Set(ownerNames)];
+    if (uniqueOwnerNames.length > 1) {
+      errors.push({
+        field: '소유자 불일치',
+        message: `서류 간 소유자 이름이 다릅니다: ${uniqueOwnerNames.join(', ')}`,
+        severity: 'warning',
+      });
+    }
+  }
+
+  return errors;
 }
 
 // 모의 OCR 결과 생성 (테스트용)

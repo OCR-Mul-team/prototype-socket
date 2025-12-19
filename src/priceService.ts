@@ -5,6 +5,16 @@ const PRICE_API_URL = 'https://xgltqfyf77.execute-api.ap-northeast-2.amazonaws.c
 
 // 차량 정보를 API 형식으로 변환
 function convertVehicleInfoToApiFormat(vehicleInfo: VehicleInfo): Record<string, unknown> {
+  // 디버깅: 입력값 확인
+  console.log('Input vehicleInfo:', {
+    distance: vehicleInfo.distance,
+    displacement: vehicleInfo.displacement,
+    newPrice: vehicleInfo.newPrice,
+    ageMonths: vehicleInfo.ageMonths,
+  });
+
+  // API 필드명이 log_distance이지만, 실제로는 원래 값을 그대로 전달
+  // (API 내부에서 로그 변환을 수행하는 것으로 추정)
   return {
     model_name: vehicleInfo.modelName,
     age_text: vehicleInfo.ageMonths,

@@ -3,7 +3,7 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
 import type { CustomerSession, UploadedDocument, VehicleInfo, OCRResult } from './types.js';
-import { analyzeDocument, mockAnalyzeDocument } from './ocrService.js';
+import { analyzeDocument, mockAnalyzeDocument, validateDocumentConsistency } from './ocrService.js';
 import { predictPrice } from './priceService.js';
 
 const app = express();
@@ -61,8 +61,9 @@ io.on('connection', (socket) => {
   // === 고객 이벤트 ===
 
   // 고객 세션 참가
-  socket.on('customer:join', (phoneNumber: string) => {
-    console.log(`[Customer] Join request from ${phoneNumber}`);
+  socket.on('customer:join', (data: { phoneNumber: string; customerName: string }) => {
+    const { phoneNumber, customerName } = data;
+    console.log(`[Customer] Join request from ${customerName} (${phoneNumber})`);
 
     // 기존 세션 확인 또는 새 세션 생성
     let session = Array.from(sessions.values()).find(
@@ -74,6 +75,7 @@ io.on('connection', (socket) => {
       session = {
         sessionId,
         phoneNumber,
+        customerName,
         createdAt: new Date(),
         status: 'active',
         documents: [],
@@ -85,8 +87,9 @@ io.on('connection', (socket) => {
       // 상담원들에게 새 세션 알림
       broadcastToAgents('agent:new_session', session);
     } else {
-      // 기존 세션에 소켓 ID 업데이트
+      // 기존 세션에 소켓 ID 및 이름 업데이트
       session.customerSocketId = socket.id;
+      session.customerName = customerName;
       sessions.set(session.sessionId, session);
       console.log(`[Customer] Existing session reconnected: ${session.sessionId}`);
     }
@@ -163,6 +166,29 @@ io.on('connection', (socket) => {
         documentId: document.id,
         ocrResult,
       });
+
+      // 고객에게도 OCR 완료 알림 (문서 정보 업데이트용)
+      sendToCustomer(session, 'customer:ocr_completed', {
+        documentId: document.id,
+        ocrResult,
+      });
+
+      // 서류 간 일관성 검증 (2개 이상의 서류가 OCR 완료된 경우)
+      const consistencyErrors = validateDocumentConsistency(session.documents);
+      if (consistencyErrors.length > 0) {
+        console.log(`[Validation] Consistency errors found:`, consistencyErrors);
+
+        // 상담원에게 일관성 검증 오류 알림
+        broadcastToAgents('agent:consistency_check', {
+          sessionId: session.sessionId,
+          errors: consistencyErrors,
+        });
+
+        // 고객에게도 알림 (경고 성격)
+        sendToCustomer(session, 'customer:consistency_warning', {
+          errors: consistencyErrors,
+        });
+      }
 
       console.log(`[OCR] Completed for document ${document.id}`);
     } catch (error) {
