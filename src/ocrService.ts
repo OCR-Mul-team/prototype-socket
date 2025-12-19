@@ -111,12 +111,14 @@ function parseVehicleRegistration(text: string): Record<string, string> {
     data['연료'] = '경유';
   }
 
-  // 발급일 추출 (문서 하단)
-  const issueDateMatch = text.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
-  if (issueDateMatch) {
-    const year = issueDateMatch[1];
-    const month = issueDateMatch[2].padStart(2, '0');
-    const day = issueDateMatch[3].padStart(2, '0');
+  // 발급일 추출 (문서 마지막 부분의 날짜 = 발급일)
+  // 모든 "YYYY년 MM월 DD일" 패턴을 찾아서 마지막 것을 발급일로 사용
+  const allDateMatches = [...text.matchAll(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/g)];
+  if (allDateMatches.length > 0) {
+    const lastDateMatch = allDateMatches[allDateMatches.length - 1];
+    const year = lastDateMatch[1];
+    const month = lastDateMatch[2].padStart(2, '0');
+    const day = lastDateMatch[3].padStart(2, '0');
     data['발급일'] = `${year}-${month}-${day}`;
   }
 
@@ -150,12 +152,13 @@ function parseTaxPayment(text: string): Record<string, string> {
     data['납부상태'] = '완납';
   }
 
-  // 발급일
-  const issueDateMatch = text.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
-  if (issueDateMatch) {
-    const year = issueDateMatch[1];
-    const month = issueDateMatch[2].padStart(2, '0');
-    const day = issueDateMatch[3].padStart(2, '0');
+  // 발급일 (문서 마지막 부분의 날짜)
+  const allDateMatches = [...text.matchAll(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/g)];
+  if (allDateMatches.length > 0) {
+    const lastDateMatch = allDateMatches[allDateMatches.length - 1];
+    const year = lastDateMatch[1];
+    const month = lastDateMatch[2].padStart(2, '0');
+    const day = lastDateMatch[3].padStart(2, '0');
     data['발급일'] = `${year}-${month}-${day}`;
   }
 
@@ -191,12 +194,13 @@ function parseSealCertificate(text: string): Record<string, string> {
     data['용도'] = '위임용';
   }
 
-  // 발급일
-  const issueDateMatch = text.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
-  if (issueDateMatch) {
-    const year = issueDateMatch[1];
-    const month = issueDateMatch[2].padStart(2, '0');
-    const day = issueDateMatch[3].padStart(2, '0');
+  // 발급일 (문서 마지막 부분의 날짜)
+  const allDateMatches = [...text.matchAll(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/g)];
+  if (allDateMatches.length > 0) {
+    const lastDateMatch = allDateMatches[allDateMatches.length - 1];
+    const year = lastDateMatch[1];
+    const month = lastDateMatch[2].padStart(2, '0');
+    const day = lastDateMatch[3].padStart(2, '0');
     data['발급일'] = `${year}-${month}-${day}`;
   }
 
@@ -231,12 +235,13 @@ function parseBusinessRegistration(text: string): Record<string, string> {
     data['업태'] = bizTypeMatch[1].trim();
   }
 
-  // 발급일
-  const issueDateMatch = text.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
-  if (issueDateMatch) {
-    const year = issueDateMatch[1];
-    const month = issueDateMatch[2].padStart(2, '0');
-    const day = issueDateMatch[3].padStart(2, '0');
+  // 발급일 (문서 마지막 부분의 날짜)
+  const allDateMatches = [...text.matchAll(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/g)];
+  if (allDateMatches.length > 0) {
+    const lastDateMatch = allDateMatches[allDateMatches.length - 1];
+    const year = lastDateMatch[1];
+    const month = lastDateMatch[2].padStart(2, '0');
+    const day = lastDateMatch[3].padStart(2, '0');
     data['발급일'] = `${year}-${month}-${day}`;
   }
 
